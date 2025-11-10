@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <title>User Subscription - Front (demo)</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        body{font-family:Segoe UI,Roboto,Arial; background:#0f2433; color:#fff; margin:0; min-height:100vh;
+            display:flex; align-items:center; justify-content:center; gap:2rem; padding:2rem;}
+        .card{background:rgba(255,255,255,0.04); padding:1.2rem; border-radius:10px; width:360px; box-shadow:0 8px 30px rgba(0,0,0,0.4)}
+        h2{margin:0 0 .8rem; color:#7fe0ff}
+        label{display:block; font-size:.85rem; margin:.45rem 0 .15rem}
+        input,textarea,select{width:100%; padding:.55rem; border-radius:6px; border:0; background:#f4f8ff0a; color:#fff}
+        button{margin-top:.8rem; width:100%; padding:.6rem; border:0; border-radius:8px; background:linear-gradient(90deg,#00c6ff,#0072ff); color:#fff; font-weight:600}
+        .small{font-size:.85rem; color:#cfe}
+        pre{white-space:pre-wrap; background:rgba(0,0,0,0.25); padding:.6rem; border-radius:6px; max-height:250px; overflow:auto}
+        .row{display:flex; gap:.6rem}
+        .col{flex:1}
+        .actions{display:flex; gap:.6rem}
+    </style>
+</head>
+<body>
+
+<div class="card" id="loginCard">
+    <h2>Login (API)</h2>
+    <label>Email</label>
+    <input id="loginEmail" placeholder="admin@demo.com" value="admin@demo.com" />
+    <label>Contraseña</label>
+    <input id="loginPassword" type="password" placeholder="admin123" value="admin123" />
+    <button id="btnLogin">Iniciar sesión</button>
+    <p class="small">Token actual: <span id="currentToken">—</span></p>
+    <p class="small">Swagger: copia el token y pega en <b>Authorize</b> como <code>Bearer &lt;token&gt;</code></p>
+    <div style="margin-top:.6rem">
+        <button id="btnLogout" style="background:#ff6b6b">Cerrar sesión (borrar token)</button>
+    </div>
+</div>
+
+<div class="card" id="crudCard">
+    <h2>Usuarios / Pruebas</h2>
+
+    <label>Nuevo usuario - Nombre</label>
+    <input id="uFirstName" placeholder="Ana" />
+    <label>Apellido</label>
+    <input id="uLastName" placeholder="Pérez" />
+    <label>Email</label>
+    <input id="uEmail" placeholder="ana.p@mail.com" />
+    <label>Birth date</label>
+    <input id="uBirthDate" placeholder="2000-01-01" />
+
+    <div class="actions">
+        <button id="btnCreate">Crear usuario</button>
+        <button id="btnList" style="background:#2ecc71">Listar</button>
+    </div>
+
+    <h3 style="margin-top:.8rem">Respuesta / Resultado</h3>
+    <pre id="output">—</pre>
+</div>
+
+<script>
+    const base = ''; // si el frontend se sirve desde Spring Boot no necesitas cambiar; si usas otro host, coloca la URL base ej: 'http://localhost:8080'
+
+    function setOutput(txt){ document.getElementById('output').textContent = txt; console.log(txt) }
+    function setTokenUI(t){ document.getElementById('currentToken').textContent = t? (t.slice(0,20)+'...') : '—' }
+
+    async function apiLogin(email, password){
+        setOutput('Login: enviando credenciales...');
+        const res = await fetch(base + '/auth/login', {
+            method: 'POST',
+            headers:{ 'Content-Type':'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        if(!res.ok){
+            const txt = await res.text();
+            setOutput('Login fallo: ' + res.status + ' — ' + txt);
+            throw new Error(txt);
+        }
+        const data = await res.json();
+        localStorage.setItem('jwt', data.token);
+        setTokenUI(data.token);
+        setOutput('Login OK. Token guardado en localStorage.');
+        return data.token;
+    }
+
+    async function callProtected(path, opts = {}){
+        const token = localStorage.getItem('jwt');
+        if(!token) throw new Error('No hay token. Hacé login primero.');
+        const headers = opts.headers || {};
+        headers['Authorization'] = 'Bearer ' + token;
+        if(opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+        const res = await fetch(base + path, {...opts, headers});
+        const text = await res.text();
+        const contentType = res.headers.get('content-type') || '';
+        if(!res.ok) throw new Error('Error ' + res.status + ': ' + text);
+        return contentType.includes('application/json') ? JSON.parse(text) : text;
+    }
+
+    /* UI wiring */
+    document.getElementById('btnLogin').addEventListener('click', async () => {
+        const email = document.getElementById('loginEmail').value.trim();
+        const pwd = document.getElementById('loginPassword').value;
+        try{
+            await apiLogin(email, pwd);
+            setOutput('Login exitoso. Ahora podés usar las rutas protegidas.');
+        }catch(e){ setOutput('Error en login: ' + e.message) }
+    });
+
+    document.getElementById('btnLogout').addEventListener('click', () => {
+        localStorage.removeItem('jwt');
+        setTokenUI(null);
+        setOutput('Token borrado.');
+    });
+
+    document.getElementById('btnCreate').addEventListener('click', async () => {
+        const body = {
+            firstName: document.getElementById('uFirstName').value.trim(),
+            lastName: document.getElementById('uLastName').value.trim(),
+            email: document.getElementById('uEmail').value.trim(),
+            birthDate: document.getElementById('uBirthDate').value.trim() || undefined
+        };
+        try{
+            setOutput('Creando usuario...');
+            const res = await callProtected('/api/users', { method:'POST', body: JSON.stringify(body) });
+            setOutput('Usuario creado:\n' + JSON.stringify(res, null, 2));
+        }catch(e){ setOutput('Fallo crear usuario: ' + e.message) }
+    });
+
+    document.getElementById('btnList').addEventListener('click', async () => {
+        try{
+            setOutput('Obteniendo lista...');
+            const res = await callProtected('/api/users', { method:'GET' });
+            setOutput('Lista:\n' + JSON.stringify(res, null, 2));
+        }catch(e){ setOutput('Fallo listar usuarios: ' + e.message) }
+    });
+
+    /* init UI from existing token */
+    setTokenUI(localStorage.getItem('jwt'));
+</script>
+
+</body>
+</html>
